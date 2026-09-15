@@ -59,4 +59,13 @@ return Application::configure(basePath: dirname(__DIR__))
                 ],
             ], Response::HTTP_CONFLICT);
         });
+
+        $exceptions->render(function (\App\Exceptions\IdempotencyKeyInUseException $e, $request) {
+            return response()->json([
+                'error' => [
+                    'code' => 'idempotency_key_in_use',
+                    'message' => $e->getMessage(),
+                ],
+            ], Response::HTTP_CONFLICT);
+        });
     })->create();

@@ -30,4 +30,14 @@ class Customer extends Model
     {
         return $this->belongsTo(User::class);
     }
+
+    public function loanApplications()
+    {
+        return $this->hasMany(LoanApplication::class);
+    }
+
+    public function loans()
+    {
+        return $this->hasMany(Loan::class);
+    }
 }

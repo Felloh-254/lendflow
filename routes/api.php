@@ -3,6 +3,10 @@
 use App\Http\Controllers\Api\V1\Admin\UserController as AdminUserController;
 use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\CustomerController;
+use App\Http\Controllers\Api\V1\LoanApplicationController;
+use App\Http\Controllers\Api\V1\LoanController;
+use App\Http\Controllers\Api\V1\LoanProductController;
+use App\Http\Controllers\Api\V1\TransactionController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
@@ -37,14 +41,36 @@ Route::prefix('v1')->group(function () {
             Route::patch('users/{user}', [AdminUserController::class, 'update']);
         });
 
-        // Remaining resource routes (loan-products, loan-applications,
-        // loans, repayments, transactions, audit-logs) are added in their
-        // respective implementation phases, each behind the relevant Policy.
+        // --- Loan products (catalog) ---
+        Route::get('loan-products', [LoanProductController::class, 'index']);
+        Route::get('loan-products/{loanProduct}', [LoanProductController::class, 'show']);
+        Route::post('loan-products', [LoanProductController::class, 'store']);
+        Route::patch('loan-products/{loanProduct}', [LoanProductController::class, 'update']);
+
+        // --- Loan applications ---
+        Route::get('loan-applications', [LoanApplicationController::class, 'index']);
+        Route::post('loan-applications', [LoanApplicationController::class, 'store']);
+        Route::get('loan-applications/{loanApplication}', [LoanApplicationController::class, 'show']);
+        Route::post('loan-applications/{loanApplication}/submit', [LoanApplicationController::class, 'submit']);
+        Route::post('loan-applications/{loanApplication}/cancel', [LoanApplicationController::class, 'cancel']);
+        Route::post('loan-applications/{loanApplication}/assess', [LoanApplicationController::class, 'assess']);
+        Route::post('loan-applications/{loanApplication}/approve', [LoanApplicationController::class, 'approve']);
+        Route::post('loan-applications/{loanApplication}/reject', [LoanApplicationController::class, 'reject']);
+
+        // --- Loans ---
+        Route::get('loans', [LoanController::class, 'index']);
+        Route::get('loans/{loan}', [LoanController::class, 'show']);
+        Route::post('loans/{loan}/disburse', [LoanController::class, 'disburse'])
+            ->middleware('idempotency');
+
+        // --- Transactions (read-only) ---
+        Route::get('transactions', [TransactionController::class, 'index']);
+        Route::get('transactions/{transaction}', [TransactionController::class, 'show']);
+
+        // Remaining resource routes (repayments, audit-logs) are added in
+        // their respective implementation phases.
         //
-        // Example shape for Phase 6 onward:
-        //
-        // Route::post('loans/{loan}/disburse', [LoanController::class, 'disburse'])
-        //     ->middleware('idempotency');
+        // Example shape for Phase 8:
         //
         // Route::post('loans/{loan}/repayments', [RepaymentController::class, 'store'])
         //     ->middleware('idempotency');

@@ -3,8 +3,12 @@
 namespace App\Providers;
 
 use App\Models\Customer;
+use App\Models\Loan;
+use App\Models\LoanApplication;
 use App\Models\User;
 use App\Policies\CustomerPolicy;
+use App\Policies\LoanApplicationPolicy;
+use App\Policies\LoanPolicy;
 use App\Policies\UserPolicy;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
@@ -23,9 +27,8 @@ class AppServiceProvider extends ServiceProvider
     protected array $policies = [
         User::class => UserPolicy::class,
         Customer::class => CustomerPolicy::class,
-        // Loan::class, LoanApplication::class, etc. are added as those
-        // models land in Phases 5–8, each with its own dedicated Policy —
-        // see docs/authorization.md.
+        LoanApplication::class => LoanApplicationPolicy::class,
+        Loan::class => LoanPolicy::class,
     ];
 
     public function register(): void {}
