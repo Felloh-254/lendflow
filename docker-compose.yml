@@ -109,6 +109,35 @@ services:
     command: >
       sh -c "while true; do php artisan schedule:run --verbose --no-interaction; sleep 60; done"
 
+  swagger-ui:
+    image: swaggerapi/swagger-ui:latest
+    container_name: lendflow-swagger-ui
+    restart: unless-stopped
+    ports:
+      - "${SWAGGER_PORT:-8081}:8080"
+    volumes:
+      - ./openapi.yaml:/openapi.yaml:ro
+    environment:
+      SWAGGER_JSON: /openapi.yaml
+    networks:
+      - lendflow
+
+  frontend:
+    image: node:20-alpine
+    container_name: lendflow-frontend
+    restart: unless-stopped
+    profiles: ["frontend"]
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000/api/v1}
+    command: sh -c "npm install && npm run dev -- --host"
+    networks:
+      - lendflow
+
 networks:
   lendflow:
     driver: bridge

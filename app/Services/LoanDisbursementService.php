@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Events\LoanDisbursed;
 use App\Exceptions\InvalidStateTransitionException;
 use App\Models\Loan;
 use App\Models\Transaction;
@@ -23,6 +24,7 @@ class LoanDisbursementService
     public function __construct(
         private readonly LedgerService $ledger,
         private readonly AuditLogService $auditLog,
+        private readonly RepaymentScheduleService $schedules,
     ) {}
 
     public function disburse(Loan $loan, User $actor): Loan
@@ -61,6 +63,11 @@ class LoanDisbursementService
             $locked->disbursed_at = now();
             $locked->save();
 
+            // Generated here, not by a separate call site, so "loan is
+            // active" and "loan has a repayment schedule" can never
+            // diverge — same rationale as the ledger write above.
+            $this->schedules->generate($locked);
+
             $this->auditLog->record(
                 $actor,
                 'loan.disbursed',
@@ -68,6 +75,8 @@ class LoanDisbursementService
                 $before,
                 $locked->only(['status', 'disbursed_at']),
             );
+
+            event(new LoanDisbursed($locked));
 
             return $locked->fresh();
         });

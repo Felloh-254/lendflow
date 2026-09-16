@@ -22,4 +22,10 @@ final class LedgerAccounts
 
     /** Interest earned/recognized. */
     public const INTEREST_INCOME = 'interest_income';
+
+    /** Late-payment penalties the institution is owed by borrowers. */
+    public const PENALTY_RECEIVABLE = 'penalty_receivable';
+
+    /** Penalty/late-fee income earned/recognized. */
+    public const PENALTY_INCOME = 'penalty_income';
 }

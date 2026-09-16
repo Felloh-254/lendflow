@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Events\LoanApproved;
 use App\Exceptions\InvalidStateTransitionException;
 use App\Models\Customer;
 use App\Models\LoanApplication;
@@ -158,6 +159,12 @@ class LoanApplicationService
                 ['status' => $before],
                 ['status' => LoanApplication::STATUS_APPROVED, 'loan_id' => $loan->id],
             );
+
+            // Dispatched from inside this transaction on purpose — see
+            // config/queue.php's after_commit note. Any queued job a
+            // listener triggers from this event will wait for this
+            // transaction to actually commit before running.
+            event(new LoanApproved($application));
 
             return $application->fresh();
         });

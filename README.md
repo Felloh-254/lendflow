@@ -56,13 +56,49 @@ curl -X POST http://localhost:8000/api/v1/auth/register \
 
 ## Running tests
 
-Tests run against a **real PostgreSQL database** (`lendflow_testing`), not SQLite — this matters later once the concurrency/locking test suite lands, since SQLite's locking semantics don't reflect what happens under Postgres row locks.
+Tests run against a **real PostgreSQL database** (`lendflow_testing`), not SQLite — this matters for the concurrency/locking test suite, since SQLite's locking semantics don't reflect what happens under Postgres row locks.
 
 ```bash
 docker compose exec app php artisan db:create lendflow_testing   # first time only, or create manually
 docker compose exec app php artisan migrate --env=testing --database=pgsql
 docker compose exec app ./vendor/bin/pest
 ```
+
+### Concurrency & deadlock demo specifically
+
+`tests/Feature/Concurrency/` spawns real, independent `php artisan` child processes against the same test database to produce genuine PostgreSQL lock contention — see `docs/race-conditions.md` and `docs/deadlocks.md` for why that's necessary (a single-process PHPUnit run can't exercise real concurrency on its own). These tests are slower than the rest of the suite (each one deliberately holds a transaction open for up to ~1.5s to guarantee real overlap) and are tagged so they can be run on their own:
+
+```bash
+docker compose exec app ./vendor/bin/pest --group=concurrency
+```
+
+You can also run the underlying commands directly to watch the raw output:
+
+```bash
+# two terminals, or use `&` to background the first
+docker compose exec app php artisan repayment:simulate {loanId} 10000 --unsafe --hold-ms=2000
+docker compose exec app php artisan repayment:simulate {loanId} 10000 --unsafe
+```
+
+## API documentation
+
+The full API is documented in `openapi.yaml` at the project root — every endpoint, request/response shape, role requirement, and the idempotency contract. See `docs/api-documentation.md` for why it's hand-authored rather than generated from annotations.
+
+```bash
+docker compose up -d swagger-ui
+# open http://localhost:8081
+```
+
+## Frontend
+
+A Vue 3 dashboard lives in `frontend/` — secondary to the backend per the project brief, but a real, working client covering the full loan lifecycle. See `frontend/README.md` for details.
+
+```bash
+docker compose --profile frontend up -d frontend
+# open http://localhost:5173
+```
+
+It's excluded from the default `docker compose up -d` (no `--profile frontend`) so the backend-only workflow this README leads with stays exactly as fast to boot as it was before the frontend existed.
 
 ## Useful commands
 

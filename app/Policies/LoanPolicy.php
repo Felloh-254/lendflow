@@ -32,4 +32,17 @@ class LoanPolicy
     {
         return $user->isRole(User::ROLE_MANAGER, User::ROLE_ADMIN);
     }
+
+    /**
+     * Only the loan's own customer can make a repayment against it — this
+     * matches the spec's "Customer: make repayments" capability. Staff
+     * roles never post a repayment through this endpoint; a real
+     * institution's staff-assisted payment flow (e.g. recording a walk-in
+     * cash payment) would be a deliberately separate, more heavily
+     * audited capability, not a side door through the customer endpoint.
+     */
+    public function repay(User $user, Loan $loan): bool
+    {
+        return $loan->customer->user_id === $user->id;
+    }
 }

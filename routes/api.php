@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\LoanApplicationController;
 use App\Http\Controllers\Api\V1\LoanController;
 use App\Http\Controllers\Api\V1\LoanProductController;
+use App\Http\Controllers\Api\V1\RepaymentController;
 use App\Http\Controllers\Api\V1\TransactionController;
 use Illuminate\Support\Facades\Route;
 
@@ -63,16 +64,16 @@ Route::prefix('v1')->group(function () {
         Route::post('loans/{loan}/disburse', [LoanController::class, 'disburse'])
             ->middleware('idempotency');
 
+        // --- Repayment schedule & repayments ---
+        Route::get('loans/{loan}/schedule', [RepaymentController::class, 'schedule']);
+        Route::get('loans/{loan}/repayments', [RepaymentController::class, 'index']);
+        Route::post('loans/{loan}/repayments', [RepaymentController::class, 'store'])
+            ->middleware('idempotency');
+
         // --- Transactions (read-only) ---
         Route::get('transactions', [TransactionController::class, 'index']);
         Route::get('transactions/{transaction}', [TransactionController::class, 'show']);
 
-        // Remaining resource routes (repayments, audit-logs) are added in
-        // their respective implementation phases.
-        //
-        // Example shape for Phase 8:
-        //
-        // Route::post('loans/{loan}/repayments', [RepaymentController::class, 'store'])
-        //     ->middleware('idempotency');
+        // audit-logs land alongside their read endpoint in a later phase.
     });
 });

@@ -19,6 +19,7 @@ class LoanResource extends JsonResource
             'total_amount' => (float) $this->total_amount,
             'outstanding_principal' => (float) $this->outstanding_principal,
             'outstanding_interest' => (float) $this->outstanding_interest,
+            'outstanding_fees' => (float) $this->outstanding_fees,
             'status' => $this->status,
             'approved_at' => $this->approved_at?->toIso8601String(),
             'disbursed_at' => $this->disbursed_at?->toIso8601String(),

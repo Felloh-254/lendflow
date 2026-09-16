@@ -1,0 +1,843 @@
+openapi: 3.0.3
+info:
+  title: LendFlow API
+  version: "1.0"
+  description: |
+    A mock digital lending platform API. Demonstrates a realistic lending
+    lifecycle (application → credit assessment → approval → disbursement →
+    repayment) with JWT authentication, role-based access control,
+    transactional integrity, idempotency, and an auditable double-entry
+    ledger.
+
+    **Not affiliated with or modeled on any real lending institution.**
+
+    ## Authentication
+    All endpoints except `/auth/register` and `/auth/login` require a
+    bearer access token, obtained from either of those two endpoints and
+    passed as `Authorization: Bearer <token>`. Access tokens are
+    short-lived (15 minutes by default) — use `/auth/refresh` with the
+    accompanying refresh token to obtain a new pair without re-entering
+    credentials. See `docs/authentication.md` in the repository for the
+    full token lifecycle.
+
+    ## Idempotency
+    `POST /loans/{id}/disburse` and `POST /loans/{id}/repayments` require
+    an `Idempotency-Key` header. Reusing a key with an identical request
+    body replays the original response (`Idempotent-Replayed: true`);
+    reusing it with a different body returns `409` with error code
+    `idempotency_key_conflict`. See `docs/idempotency.md`.
+
+    ## Errors
+    Every error response uses the same envelope:
+    ```json
+    { "error": { "code": "invalid_state_transition", "message": "..." } }
+    ```
+  contact:
+    name: LendFlow (portfolio project)
+
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Local Docker environment
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Auth
+  - name: Customers
+  - name: Admin
+  - name: Loan Products
+  - name: Loan Applications
+  - name: Loans
+  - name: Repayments
+  - name: Transactions
+
+paths:
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new customer
+      description: Public endpoint. Creates a User (role=customer) and its Customer profile in one transaction, and returns a token pair. Staff roles are never created here.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password, password_confirmation, phone, national_id, date_of_birth, monthly_income, employment_status]
+              properties:
+                name: { type: string, example: "Jane Wanjiku" }
+                email: { type: string, format: email }
+                password: { type: string, format: password, minLength: 10, description: "Must contain upper, lower, and a number." }
+                password_confirmation: { type: string, format: password }
+                phone: { type: string, example: "254712345678" }
+                national_id: { type: string, example: "12345678" }
+                date_of_birth: { type: string, format: date, description: "Must be 18+ years ago." }
+                monthly_income: { type: number, format: float, minimum: 0 }
+                employment_status: { type: string, example: "employed" }
+      responses:
+        '201':
+          description: Registered
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+      responses:
+        '200':
+          description: Authenticated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Account suspended
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Rotate a refresh token for a new access/refresh pair
+      description: The refresh token used here is immediately revoked and replaced (rotation-on-use). Reusing an already-rotated refresh token revokes every session for that user (reuse-detection).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        '200':
+          description: New token pair
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPairOnly' }
+        '401':
+          description: Refresh token invalid, expired, or already used
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Log out
+      description: Invalidates the presented access token and revokes every refresh token for the user.
+      responses:
+        '200': { description: Logged out }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get the current authenticated user
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /customers/me:
+    get:
+      tags: [Customers]
+      summary: Get the current customer's own profile
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Customer' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: "Not a customer account (e.g. staff role has no Customer profile)" }
+    patch:
+      tags: [Customers]
+      summary: Update the current customer's own profile
+      description: "Only `phone`, `monthly_income`, and `employment_status` are editable here — `national_id` and `date_of_birth` are identity fields, not self-service editable."
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phone: { type: string }
+                monthly_income: { type: number, format: float }
+                employment_status: { type: string }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Customer' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /admin/users:
+    get:
+      tags: [Admin]
+      summary: List users (admin only)
+      parameters:
+        - { name: role, in: query, schema: { type: string, enum: [customer, loan_officer, manager, admin] } }
+        - { name: status, in: query, schema: { type: string, enum: [active, suspended] } }
+        - { name: per_page, in: query, schema: { type: integer, default: 20 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/PaginatedMeta' }
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/User' } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/users/{user}:
+    patch:
+      tags: [Admin]
+      summary: Change a user's role or status (admin only)
+      description: An admin cannot modify their own account through this endpoint (self-protection rule — see docs/authorization.md).
+      parameters:
+        - { $ref: '#/components/parameters/UserId' }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role: { type: string, enum: [customer, loan_officer, manager, admin] }
+                status: { type: string, enum: [active, suspended] }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /loan-products:
+    get:
+      tags: [Loan Products]
+      summary: List loan products
+      description: Non-admins only see active products; admins see all.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/LoanProduct' } }
+    post:
+      tags: [Loan Products]
+      summary: Create a loan product (admin only)
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoanProductInput' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoanProduct' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /loan-products/{loanProduct}:
+    get:
+      tags: [Loan Products]
+      summary: Get a loan product
+      parameters:
+        - { name: loanProduct, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoanProduct' }
+    patch:
+      tags: [Loan Products]
+      summary: Update a loan product (admin only)
+      parameters:
+        - { name: loanProduct, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoanProductInput' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoanProduct' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /loan-applications:
+    get:
+      tags: [Loan Applications]
+      summary: List loan applications
+      description: |
+        Row visibility is scoped by role, not by a query parameter:
+        - **Customer**: only their own applications
+        - **Loan Officer**: applications unassigned or assigned to them
+        - **Manager / Admin**: the full portfolio
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [draft, submitted, under_review, approved, rejected, cancelled] } }
+        - { name: per_page, in: query, schema: { type: integer, default: 20 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/PaginatedMeta' }
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/LoanApplication' } }
+    post:
+      tags: [Loan Applications]
+      summary: Create a draft loan application (customer only)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [loan_product_id, amount_requested, term_months, purpose]
+              properties:
+                loan_product_id: { type: integer }
+                amount_requested: { type: number, format: float }
+                term_months: { type: integer }
+                purpose: { type: string }
+      responses:
+        '201':
+          description: Created (status=draft)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoanApplication' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /loan-applications/{loanApplication}:
+    get:
+      tags: [Loan Applications]
+      summary: Get a loan application
+      parameters: [ { $ref: '#/components/parameters/LoanApplicationId' } ]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoanApplication' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /loan-applications/{loanApplication}/submit:
+    post:
+      tags: [Loan Applications]
+      summary: Submit a draft application for review (owning customer only)
+      parameters: [ { $ref: '#/components/parameters/LoanApplicationId' } ]
+      responses:
+        '200': { description: "status → submitted", content: { application/json: { schema: { $ref: '#/components/schemas/LoanApplication' } } } }
+        '409': { $ref: '#/components/responses/InvalidStateTransition' }
+
+  /loan-applications/{loanApplication}/cancel:
+    post:
+      tags: [Loan Applications]
+      summary: Cancel a draft or submitted application (owning customer only)
+      parameters: [ { $ref: '#/components/parameters/LoanApplicationId' } ]
+      responses:
+        '200': { description: "status → cancelled", content: { application/json: { schema: { $ref: '#/components/schemas/LoanApplication' } } } }
+        '409': { $ref: '#/components/responses/InvalidStateTransition' }
+
+  /loan-applications/{loanApplication}/assess:
+    post:
+      tags: [Loan Applications]
+      summary: Run credit assessment (loan officer only)
+      description: |
+        Moves `submitted` → `under_review` and runs the deterministic
+        credit scoring service. The FIRST loan officer to assess an
+        unassigned application becomes its assigned officer — a colleague
+        gets `403` on that same application afterward. Can be called
+        again by the SAME assigned officer to re-run scoring.
+      parameters: [ { $ref: '#/components/parameters/LoanApplicationId' } ]
+      responses:
+        '200':
+          description: Assessed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoanApplication' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/InvalidStateTransition' }
+
+  /loan-applications/{loanApplication}/approve:
+    post:
+      tags: [Loan Applications]
+      summary: Approve an application (manager/admin only)
+      description: Atomically creates the corresponding Loan record in the same transaction as the status change.
+      parameters: [ { $ref: '#/components/parameters/LoanApplicationId' } ]
+      responses:
+        '200': { description: "status → approved; Loan created", content: { application/json: { schema: { $ref: '#/components/schemas/LoanApplication' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/InvalidStateTransition' }
+
+  /loan-applications/{loanApplication}/reject:
+    post:
+      tags: [Loan Applications]
+      summary: Reject an application (manager/admin only)
+      parameters: [ { $ref: '#/components/parameters/LoanApplicationId' } ]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, nullable: true }
+      responses:
+        '200': { description: "status → rejected", content: { application/json: { schema: { $ref: '#/components/schemas/LoanApplication' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/InvalidStateTransition' }
+
+  /loans:
+    get:
+      tags: [Loans]
+      summary: List loans
+      description: "Customers see only their own loans; Loan Officer/Manager/Admin see the full portfolio."
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [approved, pending_disbursement, active, overdue, completed, defaulted, cancelled] } }
+        - { name: per_page, in: query, schema: { type: integer, default: 20 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/PaginatedMeta' }
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/Loan' } }
+
+  /loans/{loan}:
+    get:
+      tags: [Loans]
+      summary: Get a loan
+      parameters: [ { $ref: '#/components/parameters/LoanId' } ]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /loans/{loan}/disburse:
+    post:
+      tags: [Loans]
+      summary: Disburse an approved loan (manager/admin only)
+      description: |
+        Requires `Idempotency-Key`. In one transaction: locks the loan row
+        (`SELECT ... FOR UPDATE`), posts a balanced disbursement
+        transaction to the ledger, sets status → active, and generates
+        the repayment schedule.
+      parameters:
+        - { $ref: '#/components/parameters/LoanId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      responses:
+        '200':
+          description: Disbursed
+          headers:
+            Idempotent-Replayed: { schema: { type: string, enum: ['true', 'false'] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
+        '400': { description: "Missing Idempotency-Key header", content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Invalid state transition, or idempotency key conflict/in-use
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /loans/{loan}/schedule:
+    get:
+      tags: [Repayments]
+      summary: Get a loan's repayment schedule
+      parameters: [ { $ref: '#/components/parameters/LoanId' } ]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/RepaymentSchedule' } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /loans/{loan}/repayments:
+    get:
+      tags: [Repayments]
+      summary: List repayments made against a loan
+      parameters:
+        - { $ref: '#/components/parameters/LoanId' }
+        - { name: per_page, in: query, schema: { type: integer, default: 20 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/PaginatedMeta' }
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/Repayment' } }
+    post:
+      tags: [Repayments]
+      summary: Make a repayment (the loan's own customer only)
+      description: |
+        Requires `Idempotency-Key`. Locks the loan row for the duration of
+        the transaction — see docs/race-conditions.md for why, and for a
+        reproducible demonstration of what happens without that lock.
+        Allocation order within the loan's schedule: oldest installment
+        first, and within an installment: penalty, then interest, then
+        principal (docs/repayment-allocation.md).
+      parameters:
+        - { $ref: '#/components/parameters/LoanId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, payment_method]
+              properties:
+                amount: { type: number, format: float, minimum: 0.01 }
+                payment_method: { type: string, enum: [mpesa, bank, wallet] }
+                external_reference: { type: string, nullable: true }
+      responses:
+        '201':
+          description: Repayment recorded
+          headers:
+            Idempotent-Replayed: { schema: { type: string, enum: ['true', 'false'] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Repayment' }
+        '400': { description: "Missing Idempotency-Key header" }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Idempotency key conflict/in-use
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Amount exceeds outstanding balance, or validation error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /transactions:
+    get:
+      tags: [Transactions]
+      summary: List financial transactions (read-only)
+      description: Customers see only transactions on their own loans.
+      parameters:
+        - { name: loan_id, in: query, schema: { type: integer } }
+        - { name: type, in: query, schema: { type: string, enum: [disbursement, repayment, fee, reversal] } }
+        - { name: per_page, in: query, schema: { type: integer, default: 20 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/PaginatedMeta' }
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/Transaction' } }
+
+  /transactions/{transaction}:
+    get:
+      tags: [Transactions]
+      summary: Get a transaction, including its ledger entries
+      parameters:
+        - { name: transaction, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transaction' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    LoanId:
+      name: loan
+      in: path
+      required: true
+      schema: { type: integer }
+    LoanApplicationId:
+      name: loanApplication
+      in: path
+      required: true
+      schema: { type: integer }
+    UserId:
+      name: user
+      in: path
+      required: true
+      schema: { type: integer }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string }
+      description: A client-generated unique key identifying this logical operation, e.g. "PAYMENT-ABC123".
+
+  responses:
+    Unauthorized:
+      description: Missing, invalid, or expired access token
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Authenticated, but not authorized for this action/resource
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ValidationError:
+      description: Request failed validation
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message: { type: string }
+              errors:
+                type: object
+                additionalProperties: { type: array, items: { type: string } }
+    InvalidStateTransition:
+      description: The requested action isn't legal from the resource's current state
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string, example: invalid_state_transition }
+            message: { type: string }
+
+    TokenResponse:
+      type: object
+      properties:
+        user: { $ref: '#/components/schemas/User' }
+        access_token: { type: string }
+        refresh_token: { type: string }
+        token_type: { type: string, example: bearer }
+        expires_in: { type: integer, description: "Access token lifetime in seconds" }
+
+    TokenPairOnly:
+      type: object
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string }
+        token_type: { type: string, example: bearer }
+        expires_in: { type: integer }
+
+    User:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        email: { type: string }
+        role: { type: string, enum: [customer, loan_officer, manager, admin] }
+        status: { type: string, enum: [active, suspended] }
+        created_at: { type: string, format: date-time }
+
+    Customer:
+      type: object
+      properties:
+        id: { type: integer }
+        user: { $ref: '#/components/schemas/User' }
+        phone: { type: string }
+        national_id: { type: string }
+        date_of_birth: { type: string, format: date }
+        monthly_income: { type: number, format: float }
+        employment_status: { type: string }
+        created_at: { type: string, format: date-time }
+
+    LoanProductInput:
+      type: object
+      required: [name, min_amount, max_amount, interest_rate, term_min, term_max]
+      properties:
+        name: { type: string }
+        description: { type: string, nullable: true }
+        min_amount: { type: number, format: float }
+        max_amount: { type: number, format: float }
+        interest_rate: { type: number, format: float, description: "Annual percentage, e.g. 14.5" }
+        term_min: { type: integer, description: months }
+        term_max: { type: integer, description: months }
+        status: { type: string, enum: [active, inactive] }
+
+    LoanProduct:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        min_amount: { type: number, format: float }
+        max_amount: { type: number, format: float }
+        interest_rate: { type: number, format: float }
+        term_min: { type: integer }
+        term_max: { type: integer }
+        status: { type: string, enum: [active, inactive] }
+
+    CreditAssessment:
+      type: object
+      properties:
+        credit_score: { type: integer, minimum: 300, maximum: 850 }
+        monthly_income: { type: number, format: float }
+        existing_debt: { type: number, format: float }
+        debt_to_income_ratio: { type: number, format: float }
+        risk_level: { type: string, enum: [low, medium, high] }
+        recommendation: { type: string, enum: [approve, reject] }
+        assessed_by: { type: integer }
+        created_at: { type: string, format: date-time }
+
+    LoanApplication:
+      type: object
+      properties:
+        id: { type: integer }
+        customer_id: { type: integer }
+        loan_product: { $ref: '#/components/schemas/LoanProduct' }
+        amount_requested: { type: number, format: float }
+        term_months: { type: integer }
+        purpose: { type: string }
+        status: { type: string, enum: [draft, submitted, under_review, approved, rejected, cancelled] }
+        assigned_loan_officer_id: { type: integer, nullable: true }
+        credit_assessment: { $ref: '#/components/schemas/CreditAssessment' }
+        submitted_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Loan:
+      type: object
+      properties:
+        id: { type: integer }
+        customer_id: { type: integer }
+        loan_application_id: { type: integer }
+        loan_product: { $ref: '#/components/schemas/LoanProduct' }
+        principal_amount: { type: number, format: float }
+        interest_amount: { type: number, format: float }
+        total_amount: { type: number, format: float }
+        outstanding_principal: { type: number, format: float }
+        outstanding_interest: { type: number, format: float }
+        outstanding_fees: { type: number, format: float }
+        status: { type: string, enum: [approved, pending_disbursement, active, overdue, completed, defaulted, cancelled] }
+        approved_at: { type: string, format: date-time, nullable: true }
+        disbursed_at: { type: string, format: date-time, nullable: true }
+        completed_at: { type: string, format: date-time, nullable: true }
+
+    RepaymentSchedule:
+      type: object
+      properties:
+        id: { type: integer }
+        installment_number: { type: integer }
+        due_date: { type: string, format: date }
+        principal_due: { type: number, format: float }
+        interest_due: { type: number, format: float }
+        penalty_due: { type: number, format: float }
+        total_due: { type: number, format: float }
+        principal_paid: { type: number, format: float }
+        interest_paid: { type: number, format: float }
+        penalty_paid: { type: number, format: float }
+        status: { type: string, enum: [pending, partially_paid, paid, overdue] }
+
+    Repayment:
+      type: object
+      properties:
+        id: { type: integer }
+        loan_id: { type: integer }
+        transaction_id: { type: integer, nullable: true }
+        amount: { type: number, format: float }
+        payment_method: { type: string, enum: [mpesa, bank, wallet] }
+        external_reference: { type: string, nullable: true }
+        status: { type: string, enum: [pending, completed, failed] }
+        paid_at: { type: string, format: date-time, nullable: true }
+
+    LedgerEntry:
+      type: object
+      properties:
+        account_code: { type: string, example: loan_principal_receivable }
+        entry_type: { type: string, enum: [debit, credit] }
+        amount: { type: number, format: float }
+
+    Transaction:
+      type: object
+      properties:
+        id: { type: integer }
+        loan_id: { type: integer }
+        reference: { type: string }
+        type: { type: string, enum: [disbursement, repayment, fee, reversal] }
+        amount: { type: number, format: float }
+        status: { type: string, enum: [pending, completed, failed, reversed] }
+        external_reference: { type: string, nullable: true }
+        ledger_entries: { type: array, items: { $ref: '#/components/schemas/LedgerEntry' } }
+        created_at: { type: string, format: date-time }
+
+    PaginatedMeta:
+      type: object
+      properties:
+        links:
+          type: object
+          properties:
+            first: { type: string, nullable: true }
+            last: { type: string, nullable: true }
+            prev: { type: string, nullable: true }
+            next: { type: string, nullable: true }
+        meta:
+          type: object
+          properties:
+            current_page: { type: integer }
+            per_page: { type: integer }
+            total: { type: integer }

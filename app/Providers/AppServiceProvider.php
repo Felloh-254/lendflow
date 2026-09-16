@@ -2,6 +2,13 @@
 
 namespace App\Providers;
 
+use App\Events\LoanApproved;
+use App\Events\LoanCompleted;
+use App\Events\RepaymentReceived;
+use App\Listeners\AuditNotificationSubscriber;
+use App\Listeners\GenerateStatementListener;
+use App\Listeners\SendLoanApprovalNotificationListener;
+use App\Listeners\SendRepaymentConfirmationListener;
 use App\Models\Customer;
 use App\Models\Loan;
 use App\Models\LoanApplication;
@@ -10,6 +17,7 @@ use App\Policies\CustomerPolicy;
 use App\Policies\LoanApplicationPolicy;
 use App\Policies\LoanPolicy;
 use App\Policies\UserPolicy;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 
@@ -31,6 +39,25 @@ class AppServiceProvider extends ServiceProvider
         Loan::class => LoanPolicy::class,
     ];
 
+    /**
+     * Event => Listener map. Registered explicitly, same reasoning as
+     * the policy map above — one place to see every domain event and
+     * what reacts to it. See docs/events.md.
+     */
+    protected array $listen = [
+        LoanApproved::class => [
+            SendLoanApprovalNotificationListener::class,
+        ],
+        RepaymentReceived::class => [
+            SendRepaymentConfirmationListener::class,
+        ],
+        LoanCompleted::class => [
+            GenerateStatementListener::class,
+        ],
+        // LoanDisbursed has no direct listener of its own — it's only
+        // consumed by AuditNotificationSubscriber below.
+    ];
+
     public function register(): void {}
 
     public function boot(): void
@@ -38,6 +65,14 @@ class AppServiceProvider extends ServiceProvider
         foreach ($this->policies as $model => $policy) {
             Gate::policy($model, $policy);
         }
+
+        foreach ($this->listen as $event => $listeners) {
+            foreach ($listeners as $listener) {
+                Event::listen($event, $listener);
+            }
+        }
+
+        Event::subscribe(AuditNotificationSubscriber::class);
 
         // Coarse, system-wide actions that don't map to a single Eloquent
         // model instance — these stay as simple Gates rather than

@@ -50,6 +50,7 @@ class Loan extends Model
         'total_amount',
         'outstanding_principal',
         'outstanding_interest',
+        'outstanding_fees',
         'status',
         'approved_at',
         'disbursed_at',
@@ -64,6 +65,7 @@ class Loan extends Model
             'total_amount' => 'decimal:2',
             'outstanding_principal' => 'decimal:2',
             'outstanding_interest' => 'decimal:2',
+            'outstanding_fees' => 'decimal:2',
             'approved_at' => 'datetime',
             'disbursed_at' => 'datetime',
             'completed_at' => 'datetime',
@@ -90,6 +92,16 @@ class Loan extends Model
         return $this->hasMany(Transaction::class);
     }
 
+    public function repaymentSchedules()
+    {
+        return $this->hasMany(RepaymentSchedule::class)->orderBy('installment_number');
+    }
+
+    public function repayments()
+    {
+        return $this->hasMany(Repayment::class);
+    }
+
     public function canTransitionTo(string $target): bool
     {
         return in_array($target, self::TRANSITIONS[$this->status] ?? [], true);
@@ -97,6 +109,6 @@ class Loan extends Model
 
     public function totalOutstanding(): float
     {
-        return (float) $this->outstanding_principal + (float) $this->outstanding_interest;
+        return (float) $this->outstanding_principal + (float) $this->outstanding_interest + (float) $this->outstanding_fees;
     }
 }
