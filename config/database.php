@@ -44,30 +44,30 @@ return [
         ],
 
         'default' => [
-            'url' => env('REDIS_URL'),
+            'scheme' => 'tls',
             'host' => env('REDIS_HOST', 'redis'),
-            'username' => env('REDIS_USERNAME'),
+            'username' => env('REDIS_USERNAME', 'default'),
             'password' => env('REDIS_PASSWORD'),
             'port' => env('REDIS_PORT', '6379'),
-            'database' => env('REDIS_DB', '0'),
+            'database' => 0,
         ],
 
         'cache' => [
-            'url' => env('REDIS_URL'),
+            'scheme' => 'tls',
             'host' => env('REDIS_HOST', 'redis'),
-            'username' => env('REDIS_USERNAME'),
+            'username' => env('REDIS_USERNAME', 'default'),
             'password' => env('REDIS_PASSWORD'),
             'port' => env('REDIS_PORT', '6379'),
-            'database' => env('REDIS_CACHE_DB', '1'),
+            'database' => 0,
         ],
 
         'queue' => [
-            'url' => env('REDIS_URL'),
+            'scheme' => 'tls',
             'host' => env('REDIS_HOST', 'redis'),
-            'username' => env('REDIS_USERNAME'),
+            'username' => env('REDIS_USERNAME', 'default'),
             'password' => env('REDIS_PASSWORD'),
             'port' => env('REDIS_PORT', '6379'),
-            'database' => env('REDIS_QUEUE_DB', '2'),
+            'database' => 0,
         ],
 
     ],
