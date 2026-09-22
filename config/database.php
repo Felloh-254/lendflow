@@ -11,10 +11,10 @@ return [
         'pgsql' => [
             'driver' => 'pgsql',
             'url' => env('DATABASE_URL'),
-            'host' => env('DB_HOST', 'postgres'),
-            'port' => env('DB_PORT', '5432'),
-            'database' => env('DB_DATABASE', 'lendflow'),
-            'username' => env('DB_USERNAME', 'lendflow'),
+            'host' => env('DB_HOST'),
+            'port' => env('DB_PORT'),
+            'database' => env('DB_DATABASE'),
+            'username' => env('DB_USERNAME'),
             'password' => env('DB_PASSWORD', ''),
             'charset' => 'utf8',
             'prefix' => '',
@@ -36,38 +36,38 @@ return [
 
     'redis' => [
 
-        'client' => env('REDIS_CLIENT', 'predis'),
+        'client' => env('REDIS_CLIENT'),
 
         'options' => [
-            'cluster' => env('REDIS_CLUSTER', 'redis'),
-            'prefix' => env('REDIS_PREFIX', Str::slug(env('APP_NAME', 'lendflow'), '_').'_database_'),
+            'cluster' => env('REDIS_CLUSTER'),
+            'prefix' => env('REDIS_PREFIX', Str::slug(env('APP_NAME'), '_').'_database_'),
         ],
 
         'default' => [
-            'scheme' => 'tls',
-            'host' => env('REDIS_HOST', 'redis'),
-            'username' => env('REDIS_USERNAME', 'default'),
+            'scheme' => env('REDIS_SCHEME'),
+            'host' => env('REDIS_HOST'),
+            'username' => env('REDIS_USERNAME'),
             'password' => env('REDIS_PASSWORD'),
-            'port' => env('REDIS_PORT', '6379'),
-            'database' => 0,
+            'port' => env('REDIS_PORT'),
+            'database' => env('REDIS_DB'),
         ],
 
         'cache' => [
-            'scheme' => 'tls',
-            'host' => env('REDIS_HOST', 'redis'),
-            'username' => env('REDIS_USERNAME', 'default'),
+            'scheme' => env('REDIS_SCHEME'),
+            'host' => env('REDIS_HOST'),
+            'username' => env('REDIS_USERNAME'),
             'password' => env('REDIS_PASSWORD'),
-            'port' => env('REDIS_PORT', '6379'),
-            'database' => 0,
+            'port' => env('REDIS_PORT'),
+            'database' => env('REDIS_DB'),
         ],
 
         'queue' => [
-            'scheme' => 'tls',
-            'host' => env('REDIS_HOST', 'redis'),
-            'username' => env('REDIS_USERNAME', 'default'),
+            'scheme' => env('REDIS_SCHEME'),
+            'host' => env('REDIS_HOST'),
+            'username' => env('REDIS_USERNAME'),
             'password' => env('REDIS_PASSWORD'),
-            'port' => env('REDIS_PORT', '6379'),
-            'database' => 0,
+            'port' => env('REDIS_PORT'),
+            'database' => env('REDIS_DB'),
         ],
 
     ],
