@@ -24,7 +24,7 @@ return Application::configure(basePath: dirname(__DIR__))
             \Illuminate\Http\Middleware\HandleCors::class,
         ]);
 
-        $middleware->throttleApi('api');
+        $middleware->throttleApi();
     })
     ->withExceptions(function (Exceptions $exceptions) {
         // Force JSON error envelopes for every exception on API routes,
