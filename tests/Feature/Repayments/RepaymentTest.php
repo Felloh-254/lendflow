@@ -197,3 +197,54 @@ it('forbids staff roles from posting a repayment through the customer endpoint',
         ->postJson("/api/v1/loans/{$loan->id}/repayments", ['amount' => 1000, 'payment_method' => 'mpesa'])
         ->assertForbidden();
 });
+
+it('replays successfully on retry even when external_reference would otherwise fail uniqueness validation', function () {
+    // Regression test: StoreRepaymentRequest validates external_reference
+    // as unique against the repayments table. Before the fix, the
+    // idempotency check ran INSIDE the controller — after validation had
+    // already run — so a genuine retry with the same external_reference
+    // (from the repayment the first request already created) failed
+    // with 422 before ever reaching the replay logic. The check now
+    // lives in EnsureIdempotencyKey middleware, which runs before
+    // validation, so a detected replay short-circuits before
+    // StoreRepaymentRequest is ever resolved.
+    [$customerUser, , $loan] = setUpActiveLoan();
+
+    $payload = ['amount' => 5000, 'payment_method' => 'mpesa', 'external_reference' => 'MPESA-CONF-998877'];
+
+    $first = $this->withHeaders($this->apiHeaders($customerUser))
+        ->withHeader('Idempotency-Key', 'REPAY-EXT-REF-RETRY')
+        ->postJson("/api/v1/loans/{$loan->id}/repayments", $payload)
+        ->assertCreated();
+
+    $second = $this->withHeaders($this->apiHeaders($customerUser))
+        ->withHeader('Idempotency-Key', 'REPAY-EXT-REF-RETRY')
+        ->postJson("/api/v1/loans/{$loan->id}/repayments", $payload);
+
+    $second->assertCreated(); // NOT 422 — this is the bug this test guards against
+    expect($second->headers->get('Idempotent-Replayed'))->toBe('true');
+    expect($second->json('id'))->toBe($first->json('id'));
+    expect(\App\Models\Repayment::where('external_reference', 'MPESA-CONF-998877')->count())->toBe(1);
+});
+
+it('still rejects a genuinely different repayment that reuses an external_reference already used by another repayment', function () {
+    // Not an idempotency case at all — a DIFFERENT idempotency key, same
+    // external_reference. This must still fail validation normally; the
+    // fix only changes behavior for a genuine retry of the SAME attempt.
+    [$customerUser, , $loan] = setUpActiveLoan();
+
+    $this->withHeaders($this->apiHeaders($customerUser))
+        ->withHeader('Idempotency-Key', 'REPAY-EXT-REF-FIRST')
+        ->postJson("/api/v1/loans/{$loan->id}/repayments", [
+            'amount' => 1000, 'payment_method' => 'mpesa', 'external_reference' => 'MPESA-SHARED-REF',
+        ])
+        ->assertCreated();
+
+    $this->withHeaders($this->apiHeaders($customerUser))
+        ->withHeader('Idempotency-Key', 'REPAY-EXT-REF-SECOND') // different key
+        ->postJson("/api/v1/loans/{$loan->id}/repayments", [
+            'amount' => 2000, 'payment_method' => 'mpesa', 'external_reference' => 'MPESA-SHARED-REF', // same reference
+        ])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('external_reference');
+});

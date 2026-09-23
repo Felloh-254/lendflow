@@ -6,7 +6,6 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\LoanResource;
 use App\Models\Loan;
 use App\Models\User;
-use App\Services\IdempotencyService;
 use App\Services\LoanDisbursementService;
 use Illuminate\Http\Request;
 
@@ -39,35 +38,19 @@ class LoanController extends Controller
     }
 
     /**
-     * Requires an Idempotency-Key header (enforced by the `idempotency`
-     * route middleware). The actual dedup/replay logic lives in
-     * IdempotencyService — this controller's job is just to wire the
-     * disbursement operation up as the callback it executes at most once.
+     * Requires an Idempotency-Key header. The full dedup/replay/conflict
+     * decision happens in the `idempotency` route middleware BEFORE this
+     * method (and this request's implicit route-model-binding, and any
+     * validation on a future request body) ever runs — see
+     * EnsureIdempotencyKey and docs/idempotency.md. This method only
+     * executes at all on a genuinely new attempt.
      */
-    public function disburse(
-        Request $request,
-        Loan $loan,
-        LoanDisbursementService $disbursement,
-        IdempotencyService $idempotency,
-    ) {
+    public function disburse(Request $request, Loan $loan, LoanDisbursementService $disbursement)
+    {
         $this->authorize('disburse', $loan);
 
-        $result = $idempotency->handle(
-            key: $request->header('Idempotency-Key'),
-            userId: $request->user()->id,
-            endpoint: "loans.{$loan->id}.disburse",
-            payload: [], // no meaningful request body for this endpoint — the key alone identifies the attempt
-            operation: function () use ($loan, $request, $disbursement) {
-                $updated = $disbursement->disburse($loan, $request->user());
+        $updated = $disbursement->disburse($loan, $request->user());
 
-                return [
-                    'status' => 200,
-                    'body' => (new LoanResource($updated->load('loanProduct')))->resolve(),
-                ];
-            },
-        );
-
-        return response()->json($result['body'], $result['status'])
-            ->header('Idempotent-Replayed', $result['replayed'] ? 'true' : 'false');
+        return new LoanResource($updated->load('loanProduct'));
     }
 }

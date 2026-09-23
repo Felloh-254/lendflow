@@ -20,7 +20,7 @@ Pest, on top of PHPUnit (Pest is a thin, expressive syntax layer — every Pest 
 
 **Concurrency** (`tests/Feature/Concurrency/`, tagged `@group concurrency`) — the one category that doesn't fit the "single PHPUnit process" model at all, and is built differently on purpose: real, independent OS processes (`php artisan repayment:simulate` / `deadlock:simulate`) against the same live database, proving actual PostgreSQL lock contention rather than a mocked approximation of it. See `docs/race-conditions.md` and `docs/deadlocks.md` for the full reasoning; run them on their own with `./vendor/bin/pest --group=concurrency` since they're deliberately slower (each holds a transaction open for up to ~1.5s to guarantee real overlap between processes).
 
-**Idempotency** (`tests/Feature/IdempotencyServiceTest.php`, plus coverage embedded in the disbursement/repayment tests) — replay of an identical request, conflict on a reused key with a different body, the in-progress-request case, and retry-ability after a failed attempt.
+**Idempotency** (`tests/Feature/IdempotencyServiceTest.php`, plus coverage embedded in the disbursement/repayment tests) — replay of an identical request, conflict on a reused key with a different body, the in-progress-request case, retry-ability after a failed attempt, and a dedicated regression test (`tests/Feature/Repayments/RepaymentTest.php`) proving a retried repayment with a repeated `external_reference` replays successfully instead of failing FormRequest validation — see `docs/idempotency.md` for the bug that test guards against.
 
 ## What's deliberately NOT tested here
 

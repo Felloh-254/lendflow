@@ -107,6 +107,17 @@ class IdempotencyService
 
     private function hashPayload(array $payload): string
     {
+        // Sort by key before encoding so the hash is independent of the
+        // order keys happened to arrive in. This mattered less when the
+        // hashed payload was always $request->validated() (whose order
+        // follows the FormRequest's rules() array, not client input) —
+        // now that EnsureIdempotencyKey hashes the raw request body
+        // (necessarily, since it runs before validation), two otherwise
+        // identical retries shouldn't be treated as a conflict just
+        // because a client's JSON serializer happened to order fields
+        // differently between attempts.
+        ksort($payload);
+
         return hash('sha256', json_encode($payload, JSON_THROW_ON_ERROR));
     }
 

@@ -31,22 +31,35 @@ A repayment, end to end:
 ```
 POST /loans/{id}/repayments
   → JwtAuthenticate middleware (resolves & validates the bearer token)
-  → EnsureIdempotencyKey middleware (rejects if header missing)
+  → EnsureIdempotencyKey middleware
+      → owns the FULL idempotency decision — not just "is the header
+        present". Hashes the RAW request body and checks it against
+        idempotency_keys before anything below this line runs.
+      → on a detected replay: returns the cached response HERE and stops
+        — StoreRepaymentRequest, the Policy check, and the controller
+        never run at all (this is deliberate — see docs/idempotency.md
+        for the bug this ordering fixes: validating first and checking
+        idempotency second broke replay for any retried request whose
+        external_reference had already been used by its own first
+        attempt)
+      → on a genuinely new key: calls $next($request), which is what
+        triggers everything below
   → RepaymentController::store()
-      → StoreRepaymentRequest (validates amount/payment_method)
+      → StoreRepaymentRequest (validates amount/payment_method/external_reference)
       → LoanPolicy::repay (authorization)
-      → IdempotencyService::handle() wraps the operation
-          → RepaymentService::create()
-              → DB::transaction()
-                  → Loan row lock (lockForUpdate)
-                  → RepaymentAllocationService::allocate() (pure calculation)
-                  → write repayment_schedules, loans.outstanding_*
-                  → LedgerService::post() (balanced double-entry Transaction + LedgerEntry rows)
-                  → Repayment row created
-                  → AuditLogService::record() (same transaction)
-                  → event(RepaymentReceived) / event(LoanCompleted)
-                      → Listener dispatches a queued Job (after_commit-deferred)
+      → RepaymentService::create()
+          → DB::transaction()
+              → Loan row lock (lockForUpdate)
+              → RepaymentAllocationService::allocate() (pure calculation)
+              → write repayment_schedules, loans.outstanding_*
+              → LedgerService::post() (balanced double-entry Transaction + LedgerEntry rows)
+              → Repayment row created
+              → AuditLogService::record() (same transaction)
+              → event(RepaymentReceived) / event(LoanCompleted)
+                  → Listener dispatches a queued Job (after_commit-deferred)
       → RepaymentResource
+  → back in EnsureIdempotencyKey: response captured and stored against
+    the idempotency key, Idempotent-Replayed: false header added
 ```
 
 Every arrow into a transaction stays inside it; every arrow crossing a process boundary (HTTP response, queued job) happens only after the transaction has committed.
