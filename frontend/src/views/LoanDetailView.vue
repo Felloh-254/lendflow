@@ -20,11 +20,16 @@ const transactions = ref([])
 const loading = ref(true)
 const error = ref('')
 const disbursing = ref(false)
+const disbursementIdempotencyKey = ref(null)
+const disbursementAttempt = ref(null)
 
 const repayAmount = ref('')
 const repayMethod = ref('mpesa')
 const repayLoading = ref(false)
 const repayError = ref('')
+const repaymentIdempotencyKey = ref(null)
+const repaymentAttempt = ref(null)
+
 
 async function loadAll() {
   loading.value = true
@@ -57,14 +62,34 @@ const canRepay = computed(() => auth.isCustomer && ['active', 'overdue'].include
 async function disburse() {
   disbursing.value = true
   error.value = ''
+
   try {
-    const idempotencyKey = crypto.randomUUID()
-    const { data } = await api.post(`/loans/${route.params.id}/disburse`, null, {
-      headers: { 'Idempotency-Key': idempotencyKey },
-    })
+    if (!disbursementAttempt.value) {
+      disbursementAttempt.value = {
+        idempotencyKey: crypto.randomUUID(),
+      }
+    }
+
+    const { data } = await api.post(
+      `/loans/${route.params.id}/disburse`,
+      null,
+      {
+        headers: {
+          'Idempotency-Key': disbursementAttempt.value.idempotencyKey,
+        },
+      }
+    )
+
     loan.value = data
+
+    // The disbursement succeeded.
+    // This attempt is now complete.
+    disbursementAttempt.value = null
+
     await loadAll()
   } catch (e) {
+    // Keep the same idempotency key.
+    // If the user retries, the same transaction key is reused.
     error.value = apiErrorMessage(e)
   } finally {
     disbursing.value = false
@@ -74,16 +99,48 @@ async function disburse() {
 async function makeRepayment() {
   repayLoading.value = true
   repayError.value = ''
+
   try {
-    const idempotencyKey = crypto.randomUUID()
+    const amount = repayAmount.value
+    const method = repayMethod.value
+
+    // Create a new transaction attempt if:
+    // 1. There isn't one yet, OR
+    // 2. The user changed the amount, OR
+    // 3. The user changed the payment method.
+    if (
+      !repaymentAttempt.value ||
+      repaymentAttempt.value.amount !== amount ||
+      repaymentAttempt.value.method !== method
+    ) {
+      repaymentAttempt.value = {
+        amount,
+        method,
+        idempotencyKey: crypto.randomUUID(),
+      }
+    }
+
     await api.post(
       `/loans/${route.params.id}/repayments`,
-      { amount: repayAmount.value, payment_method: repayMethod.value },
-      { headers: { 'Idempotency-Key': idempotencyKey } }
+      {
+        amount: repaymentAttempt.value.amount,
+        payment_method: repaymentAttempt.value.method,
+      },
+      {
+        headers: {
+          'Idempotency-Key': repaymentAttempt.value.idempotencyKey,
+        },
+      }
     )
+
+    // Successful repayment.
     repayAmount.value = ''
+    repaymentAttempt.value = null
+
     await loadAll()
   } catch (e) {
+    // DO NOT clear repaymentAttempt here.
+    // A retry must use the same idempotency key.
     repayError.value = apiErrorMessage(e)
   } finally {
     repayLoading.value = false
